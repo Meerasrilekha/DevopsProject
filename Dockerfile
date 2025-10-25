@@ -1,21 +1,23 @@
-# Dockerfile (recommended)
-FROM node:20
+# Use a smaller, production-ready Node.js base image
+FROM node:20-slim
 
-# set working dir inside container
+# Set working directory inside container
 WORKDIR /usr/src/app
 
-# copy package files first for caching
+# Copy package files first for caching
 COPY package*.json ./
 
-# install dependencies inside the container (native modules built for Linux)
+# Install only production dependencies
 RUN npm ci --only=production
-# If you need dev deps in the image (tests/build), use `npm ci` instead.
 
-# copy app source code
+# Copy the rest of the app source code
 COPY . .
 
-# expose the port your app uses
+# Exclude unnecessary files to reduce image size
+# (Make sure you have a .dockerignore with node_modules, logs, etc.)
+
+# Expose the port your app uses
 EXPOSE 3000
 
-# start the app
+# Start the app
 CMD ["node", "server.js"]
