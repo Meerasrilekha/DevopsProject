@@ -1,357 +1,416 @@
+// server.js
+
+require('dotenv').config();
+const path = require('path');
+
 const express = require('express');
-const mysql = require('mysql2');
+const mongoose = require('mongoose');
 const bodyParser = require('body-parser');
 const bcrypt = require('bcrypt');
 const session = require('express-session');
-const app = express();
-const port = 3000;
+const MongoStore = require('connect-mongo');
 
+const app = express();
+const port = process.env.PORT || 3000;
+
+// middleware
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use(express.static('public'));
 
-// Session configuration
+// MongoDB connection
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/solar_install';
+mongoose.connect(MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+}).then(() => {
+  console.log('✅ Connected to MongoDB');
+}).catch(err => {
+  console.error('❌ MongoDB connection error:', err);
+  process.exit(1);
+});
+
+// Session configuration (stored in MongoDB)
 app.use(session({
-    secret: 'your-secret-key',
-    resave: false,
-    saveUninitialized: false,
-    cookie: { secure: false } // Set to true if using HTTPS
+  secret: process.env.SESSION_SECRET || 'your-secret-key',
+  resave: false,
+  saveUninitialized: false,
+  store: MongoStore.create({
+    mongoUrl: MONGODB_URI,
+    collectionName: 'sessions',
+    ttl: 14 * 24 * 60 * 60 // 14 days
+  }),
+  cookie: { secure: false } // set true if using HTTPS
 }));
 
-// MySQL database connection
-const db = mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    password: 'meera@1213',
-    database: 'solar_install'
+/* ----------------------------
+   Mongoose Schemas & Models
+   ---------------------------- */
+const { Schema, model, Types } = mongoose;
+
+const userSchema = new Schema({
+  username: { type: String, required: true, index: true },
+  email: { type: String, required: true, unique: true, index: true },
+  password: { type: String, required: true },
+  createdAt: { type: Date, default: Date.now }
 });
 
-db.connect((err) => {
-    if (err) {
-        console.error('Error connecting to MySQL:', err);
-        return;
-    }
-    console.log('Connected to MySQL database!');
+const formSubmissionSchema = new Schema({
+  user: { type: Types.ObjectId, ref: 'User', required: false }, // optional if anonymous
+  userEmail: { type: String }, // keep email for quick access
+  formType: { type: String, required: true },
+  formData: { type: Schema.Types.Mixed },
+  createdAt: { type: Date, default: Date.now }
 });
 
-// Route for the home page
-app.get('/', (req, res) => {
-    res.sendFile(__dirname + '/public/index.html');
+const contactFormSchema = new Schema({
+  fullName: String,
+  email: { type: String, required: true, index: true },
+  phone: { type: String, required: true, index: true },
+  message: String,
+  createdAt: { type: Date, default: Date.now }
 });
 
-// Helper function to save form submission data with foreign key
-function saveFormSubmission(userId, formType, formData, res) {
-    const sql = 'INSERT INTO form_submissions (user_id, form_type, form_data) VALUES (?, ?, ?)';
-    db.query(sql, [userId, formType, JSON.stringify(formData)], (err) => {
-        if (err) {
-            console.error('Error saving form submission:', err);
-            return res.status(500).send('Error saving form submission.');
-        }
-        res.send('Form submitted and saved successfully.');
-    });
-}
-
-// Signup route
-app.post('/signup', (req, res) => {
-    const { username, email, password } = req.body;
-
-    if (!username || !email || !password) {
-        return res.status(400).json({ success: false, error: 'All fields are required' });
-    }
-
-    // Hash password
-    bcrypt.hash(password, 10, (err, hashedPassword) => {
-        if (err) {
-            console.error('Error hashing password:', err);
-            return res.status(500).json({ success: false, error: 'Error processing signup' });
-        }
-
-        const checkSql = 'SELECT * FROM users WHERE email = ? OR username = ?';
-        db.query(checkSql, [email, username], (err, results) => {
-            if (err) {
-                console.error('Error checking duplicates:', err);
-                return res.status(500).json({ success: false, error: 'Error processing signup' });
-            }
-
-            if (results.length > 0) {
-                return res.status(409).json({ success: false, error: 'User already exists' });
-            }
-
-            const sql = 'INSERT INTO users (username, email, password) VALUES (?, ?, ?)';
-            db.query(sql, [username, email, hashedPassword], (err) => {
-                if (err) {
-                    console.error('Error inserting user data:', err);
-                    return res.status(500).json({ success: false, error: 'Error processing signup' });
-                }
-                res.json({ success: true, message: 'User registered successfully!' });
-            });
-        });
-    });
+const solarServiceSchema = new Schema({
+  full_name: String,
+  email: { type: String, index: true },
+  phone: { type: String, index: true },
+  service_type: String,
+  service_details: String,
+  street_address: String,
+  street_address_line2: String,
+  city: String,
+  region: String,
+  postal_code: String,
+  createdAt: { type: Date, default: Date.now }
 });
 
-// Login route
-app.post('/login', (req, res) => {
-    const { username, password } = req.body;
-
-    if (!username || !password) {
-        return res.status(400).json({ success: false, error: 'Username and password are required' });
-    }
-
-    const sql = 'SELECT * FROM users WHERE username = ?';
-    db.query(sql, [username], (err, results) => {
-        if (err) {
-            console.error('Error fetching user data:', err);
-            return res.status(500).json({ success: false, error: 'Error processing login' });
-        }
-
-        if (results.length === 0) {
-            return res.status(401).json({ success: false, error: 'User not found' });
-        }
-
-        const user = results[0];
-
-        bcrypt.compare(password, user.password, (err, match) => {
-            if (err) {
-                console.error('Error comparing password:', err);
-                return res.status(500).json({ success: false, error: 'Error processing login' });
-            }
-
-            if (!match) {
-                return res.status(401).json({ success: false, error: 'Incorrect password' });
-            }
-
-            req.session.user = { id: user.id, email: user.email };
-            res.json({ success: true, message: 'Login successful!' });
-        });
-    });
+const solarCalculatorSchema = new Schema({
+  panel_capacity: String,
+  roof_area: String,
+  budget: String,
+  state: String,
+  customer_category: String,
+  electricity_cost: String,
+  createdAt: { type: Date, default: Date.now }
 });
 
-
-// Endpoint to handle form submissions
-app.post('/submit', (req, res) => {
-    const { formType, formData } = req.body; // Get the form type and data
-    const userEmail = req.session.user?.email;
-
-    if (!userEmail) {
-        return res.status(403).send('Unauthorized');
-    }
-
-    db.query('INSERT INTO form_submissions (user_email, form_type, form_data) VALUES (?, ?, ?)', [userEmail, formType, formData], (err) => {
-        if (err) return res.status(500).send('Error saving form submission.');
-        res.send('Form submitted successfully.');
-    });
+const notificationSchema = new Schema({
+  message: String,
+  createdAt: { type: Date, default: Date.now }
 });
-// Middleware to check if user is authenticated
+
+// Models
+const User = model('User', userSchema);
+const FormSubmission = model('FormSubmission', formSubmissionSchema);
+const ContactForm = model('ContactForm', contactFormSchema);
+const SolarService = model('SolarService', solarServiceSchema);
+const SolarCalculatorData = model('SolarCalculatorData', solarCalculatorSchema);
+const Notification = model('Notification', notificationSchema);
+
+/* ----------------------------
+   Helper & Middleware
+   ---------------------------- */
 function isAuthenticated(req, res, next) {
-    if (req.session.user) {
-        return next();
-    }
-    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  if (req.session && req.session.user) return next();
+  return res.status(401).json({ success: false, error: 'Unauthorized' });
 }
 
-// Account route to get logged-in user details
-app.get('/account', (req, res) => {
-    if (req.session.user) {
-        res.json({ success: true, email: req.session.user.email });
-    } else {
-        res.json({ success: false, email: null });
-    }
+async function saveFormSubmission(userId, formType, formData, res) {
+  try {
+    const user = userId ? await User.findById(userId).lean() : null;
+    const doc = new FormSubmission({
+      user: user ? user._id : undefined,
+      userEmail: user ? user.email : undefined,
+      formType,
+      formData
+    });
+    await doc.save();
+    return res.json({ success: true, message: 'Form submitted and saved successfully.' });
+  } catch (err) {
+    console.error('Error saving form submission:', err);
+    return res.status(500).send('Error saving form submission.');
+  }
+}
+
+/* ----------------------------
+   Routes (converted to Mongo)
+   ---------------------------- */
+
+// Home page: serve index.html from public
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/public/index.html');
 });
 
-// Route for contact form submission with duplicate check
-app.post('/submit-contact', isAuthenticated, (req, res) => {
-    const { fullName, email, phone, message } = req.body;
+// Signup
+app.post('/signup', async (req, res) => {
+  try {
+    const { username, email, password } = req.body;
+    if (!username || !email || !password) return res.status(400).json({ success: false, error: 'All fields are required' });
 
+    // check duplicates by username or email
+    const existing = await User.findOne({ $or: [{ email }, { username }] }).lean();
+    if (existing) return res.status(409).json({ success: false, error: 'User already exists' });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const newUser = new User({ username, email, password: hashedPassword });
+    await newUser.save();
+    return res.json({ success: true, message: 'User registered successfully!' });
+  } catch (err) {
+    console.error('Signup error:', err);
+    return res.status(500).json({ success: false, error: 'Error processing signup' });
+  }
+});
+
+// Login
+app.post('/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) return res.status(400).json({ success: false, error: 'Username and password are required' });
+
+    const user = await User.findOne({ username }).exec();
+    if (!user) return res.status(401).json({ success: false, error: 'User not found' });
+
+    const match = await bcrypt.compare(password, user.password);
+    if (!match) return res.status(401).json({ success: false, error: 'Incorrect password' });
+
+    req.session.user = { id: user._id.toString(), email: user.email };
+    return res.json({ success: true, message: 'Login successful!' });
+  } catch (err) {
+    console.error('Login error:', err);
+    return res.status(500).json({ success: false, error: 'Error processing login' });
+  }
+});
+
+// Generic endpoint to handle form submission (requires session)
+app.post('/submit', async (req, res) => {
+  try {
+    const { formType, formData } = req.body;
+    const userEmail = req.session.user?.email;
+    const userId = req.session.user?.id;
+
+    if (!userEmail) return res.status(403).send('Unauthorized');
+
+    // Here we save it as a FormSubmission document
+    const doc = new FormSubmission({
+      user: userId ? Types.ObjectId(userId) : undefined,
+      userEmail,
+      formType,
+      formData
+    });
+    await doc.save();
+    return res.send('Form submitted successfully.');
+  } catch (err) {
+    console.error('Submit error:', err);
+    return res.status(500).send('Error saving form submission.');
+  }
+});
+
+// Account info
+app.get('/account', (req, res) => {
+  if (req.session.user) {
+    res.json({ success: true, email: req.session.user.email });
+  } else {
+    res.json({ success: false, email: null });
+  }
+});
+
+/* 
+  Contact form route (original code required authentication)
+  We'll keep it protected with isAuthenticated by default.
+*/
+app.post('/submit-contact', isAuthenticated, async (req, res) => {
+  try {
+    const { fullName, email, phone, message } = req.body;
     console.log('Contact Form Submission Data:', req.body);
 
-    if (!fullName || !email || !phone || !message) {
-        return res.status(400).json({ success: false, error: 'Please fill in all required fields.' });
-    }
+    if (!fullName || !email || !phone || !message) return res.status(400).json({ success: false, error: 'Please fill in all required fields.' });
 
-    const checkSql = 'SELECT * FROM contact_form WHERE email = ? OR phone = ?';
-    db.query(checkSql, [email, phone], (err, results) => {
-        if (err) {
-            console.error('Error checking duplicates:', err);
-            return res.status(500).json({ success: false, error: 'Error processing contact form' });
-        }
-        
-        if (results.length > 0) {
-            return res.status(409).json({ success: false, error: 'User already exists.' });
-        }
+    // Duplicate check by email or phone
+    const existing = await ContactForm.findOne({ $or: [{ email }, { phone }] }).lean();
+    if (existing) return res.status(409).json({ success: false, error: 'User already exists.' });
 
-        // Insert if no duplicates found
-        const sql = 'INSERT INTO contact_form (Name, email, phone, message) VALUES (?, ?, ?, ?)';
-        db.query(sql, [fullName, email, phone, message], (err, result) => {
-            if (err) {
-                console.error('Error inserting contact data:', err);
-                return res.status(500).json({ success: false, error: 'Error submitting contact form' });
-            }
-            console.log('Contact data inserted into MySQL:', result);
-            res.json({ success: true, message: 'Contact form submission successful!' });
-        });
-    });
+    const contact = new ContactForm({ fullName, email, phone, message });
+    await contact.save();
+
+    // Save a generic form submission too (optional)
+    await new FormSubmission({ user: req.session.user.id, userEmail: req.session.user.email, formType: 'contact_form', formData: req.body }).save();
+
+    console.log('Contact data inserted into MongoDB');
+    res.json({ success: true, message: 'Contact form submission successful!' });
+  } catch (err) {
+    console.error('Contact form error:', err);
+    res.status(500).json({ success: false, error: 'Error submitting contact form' });
+  }
 });
-// Route for solar service form submission with duplicate check
-app.post('/submit-form', (req, res) => {
-    const { fullName, email, phone, serviceType, serviceDetails, streetAddress, streetAddressLine2, city, region, postalCode } = req.body;
+
+// Solar service submission (originally not protected; kept public here)
+app.post('/submit-form', async (req, res) => {
+  try {
+    const {
+      fullName, email, phone, serviceType, serviceDetails,
+      streetAddress, streetAddressLine2, city, region, postalCode
+    } = req.body;
 
     console.log('Form Submission Data:', req.body);
 
     if (!fullName || !email || !phone || !serviceType || !serviceDetails || !streetAddress || !city || !region || !postalCode) {
-        return res.status(400).json({ success: false, error: 'Please fill in all required fields.' });
+      return res.status(400).json({ success: false, error: 'Please fill in all required fields.' });
     }
 
-    const checkSql = 'SELECT * FROM solar_services WHERE email = ? OR phone = ?';
-    db.query(checkSql, [email, phone], (err, results) => {
-        if (err) {
-            console.error('Error checking duplicates:', err);
-            return res.status(500).json({ success: false, error: 'Error processing service form' });
-        }
+    const existing = await SolarService.findOne({ $or: [{ email }, { phone }] }).lean();
+    if (existing) {
+      // Matches previous behavior which returned 409 with a success message in original code
+      return res.status(409).json({ success: false, error: 'Service Submitted Successfully' });
+    }
 
-        if (results.length > 0) {
-            return res.status(409).json({ success: false, error: 'Service Submitted Successfully' });
-        }
-
-        // Insert if no duplicates found
-        const sql = 'INSERT INTO solar_services (full_name, email, phone, service_type, service_details, street_address, street_address_line2, city, region, postal_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
-        db.query(sql, [fullName, email, phone, serviceType, serviceDetails, streetAddress, streetAddressLine2, city, region, postalCode], (err, result) => {
-            if (err) {
-                console.error('Error inserting data:', err);
-                return res.status(500).json({ success: false, message:'Please wait till your previous requests gets accepted' });
-            }
-            console.log('Data inserted into MySQL:', result);
-            res.json({ success: true, message: 'Form submission successful!' });
-        });
+    const doc = new SolarService({
+      full_name: fullName,
+      email,
+      phone,
+      service_type: serviceType,
+      service_details: serviceDetails,
+      street_address: streetAddress,
+      street_address_line2: streetAddressLine2,
+      city, region, postal_code: postalCode
     });
+    await doc.save();
+
+    // optional: store a FormSubmission record (user may be anonymous)
+    await new FormSubmission({ formType: 'solar_services', formData: req.body, userEmail: email }).save();
+
+    console.log('Data inserted into MongoDB');
+    res.json({ success: true, message: 'Form submission successful!' });
+  } catch (err) {
+    console.error('Submit-form error:', err);
+    return res.status(500).json({ success: false, message: 'Please wait till your previous requests gets accepted' });
+  }
 });
 
-// Route for calculator form submission with duplicate check
-app.post('/submit-calculator', (req, res) => {
+// Calculator submission
+app.post('/submit-calculator', async (req, res) => {
+  try {
     const { panelCapacity, roofArea, budget, state, customerCategory, electricityCost } = req.body;
-
     console.log('Calculator Form Data:', req.body);
 
     if (!panelCapacity || !roofArea || !budget || !state || !customerCategory || !electricityCost) {
-        return res.status(400).json({ success: false, error: 'Please fill in all required fields.' });
+      return res.status(400).json({ success: false, error: 'Please fill in all required fields.' });
     }
 
-    const checkSql = 'SELECT * FROM solar_calculator_data WHERE panel_capacity = ? AND roof_area = ? AND state = ?';
-    db.query(checkSql, [panelCapacity, roofArea, state], (err, results) => {
-        if (err) {
-            console.error('Error checking duplicates:', err);
-            return res.status(500).json({ success: false, error: 'Error processing calculator data' });
-        }
+    // duplicate check by fields (mimicking original)
+    const existing = await SolarCalculatorData.findOne({
+      panel_capacity: panelCapacity,
+      roof_area: roofArea,
+      state: state
+    }).lean();
 
-        if (results.length > 0) {
-            return res.status(409).json({ success: false, error: 'Requirement submitted successfully' });
-        }
+    if (existing) {
+      return res.status(409).json({ success: false, error: 'Requirement submitted successfully' });
+    }
 
-        // Insert if no duplicates found
-        const sql = 'INSERT INTO solar_calculator_data(panel_capacity, roof_area, budget, state, customer_category, electricity_cost) VALUES (?, ?, ?, ?, ?, ?)';
-        db.query(sql, [panelCapacity, roofArea, budget, state, customerCategory, electricityCost], (err, result) => {
-            if (err) {
-                console.error('Error inserting calculator data:', err);
-                return res.status(500).json({ success: false, error: 'Error submitting calculator data' });
-            }
-            console.log('Calculator data inserted into MySQL:', result);
-            res.json({ success: true, message: 'Calculator data submission successful!' });
-        });
+    const doc = new SolarCalculatorData({
+      panel_capacity: panelCapacity,
+      roof_area: roofArea,
+      budget,
+      state,
+      customer_category: customerCategory,
+      electricity_cost: electricityCost
     });
+    await doc.save();
+
+    await new FormSubmission({ formType: 'solar_calculator_data', formData: req.body }).save();
+
+    console.log('Calculator data inserted into MongoDB');
+    res.json({ success: true, message: 'Calculator data submission successful!' });
+  } catch (err) {
+    console.error('Calculator submit error:', err);
+    res.status(500).json({ success: false, error: 'Error submitting calculator data' });
+  }
 });
 
-// Routes to retrieve data
-app.get('/get-all-services', (req, res) => {
-    const sql = 'SELECT * FROM solar_services';
-    db.query(sql, (err, results) => {
-        if (err) {
-            console.error('Error retrieving data:', err);
-            return res.status(500).json({ success: false, error: 'Error retrieving service data' });
-        }
-        res.json({ success: true, data: results });
-    });
+/* Retrieval endpoints */
+app.get('/get-all-services', async (req, res) => {
+  try {
+    const results = await SolarService.find().lean();
+    res.json({ success: true, data: results });
+  } catch (err) {
+    console.error('Error retrieving services:', err);
+    res.status(500).json({ success: false, error: 'Error retrieving service data' });
+  }
 });
 
-app.get('/get-contact-data', (req, res) => {
-    const sql = 'SELECT * FROM contact_form';
-    db.query(sql, (err, results) => {
-        if (err) {
-            console.error('Error retrieving data:', err);
-            return res.status(500).json({ success: false, error: 'Error retrieving contact data' });
-        }
-        res.json({ success: true, data: results });
-    });
+app.get('/get-contact-data', async (req, res) => {
+  try {
+    const results = await ContactForm.find().lean();
+    res.json({ success: true, data: results });
+  } catch (err) {
+    console.error('Error retrieving contact data:', err);
+    res.status(500).json({ success: false, error: 'Error retrieving contact data' });
+  }
 });
 
-app.get('/get-calculator-data', (req, res) => {
-    const sql = 'SELECT * FROM solar_calculator_data';
-    db.query(sql, (err, results) => {
-        if (err) {
-            console.error('Error retrieving data:', err);
-            return res.status(500).json({ success: false, error: 'Error retrieving calculator data' });
-        }
-        res.json({ success: true, data: results });
-    });
+app.get('/get-calculator-data', async (req, res) => {
+  try {
+    const results = await SolarCalculatorData.find().lean();
+    res.json({ success: true, data: results });
+  } catch (err) {
+    console.error('Error retrieving calculator data:', err);
+    res.status(500).json({ success: false, error: 'Error retrieving calculator data' });
+  }
 });
 
-// Route to fetch notifications
-app.get('/notifications', (req, res) => {
-    const query = 'SELECT message, created_at FROM notifications ORDER BY created_at DESC';
-    db.query(query, (error, results) => {
-        if (error) {
-            res.status(500).json({ success: false, error: 'Error fetching notifications' });
-        } else {
-            res.json({ success: true, notifications: results });
-        }
-    });
+app.get('/notifications', async (req, res) => {
+  try {
+    const results = await Notification.find().sort({ createdAt: -1 }).lean();
+    res.json({ success: true, notifications: results });
+  } catch (err) {
+    console.error('Error fetching notifications:', err);
+    res.status(500).json({ success: false, error: 'Error fetching notifications' });
+  }
 });
 
-
-// Endpoint to handle form submissions
-app.post('/submit-form', isAuthenticated, (req, res) => {
-    const formData = req.body;
-    const formType = 'solar_services';
-    const userId = req.session.user.id;
-    saveFormSubmission(userId, formType, formData, res);
-});
-
-// Route for contact form submission with duplicate check
-app.post('/submit-contact', isAuthenticated, (req, res) => {
-    const formData = req.body;
-    const formType = 'contact_form';
-    const userId = req.session.user.id;
-    saveFormSubmission(userId, formType, formData, res);
-});
-
-// Route for solar calculator form submission with duplicate check
-app.post('/submit-calculator', isAuthenticated, (req, res) => {
-    const formData = req.body;
-    const formType = 'solar_calculator_data';
-    const userId = req.session.user.id;
-    saveFormSubmission(userId, formType, formData, res);
-});
-// Route to fetch solar data
-app.get('/fetch-solar-data', (req, res) => {
+// fetch-solar-data by date (YYYY-MM-DD)
+app.get('/fetch-solar-data', async (req, res) => {
+  try {
     const { date } = req.query;
+    if (!date) return res.status(400).json({ success: false, message: 'Date parameter is required.' });
 
-    if (!date) {
-        return res.status(400).json({ success: false, message: 'Date parameter is required.' });
-    }
+    // create start and end for the selected day
+    const start = new Date(date);
+    start.setHours(0,0,0,0);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 1);
 
-    const sql = `SELECT id, service_type AS serviceType, DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS formatted_timestamp 
-                 FROM solar_services 
-                 WHERE DATE(created_at) = ?`; // Updated to use created_at
+    const results = await SolarService.find({
+      createdAt: { $gte: start, $lt: end }
+    }, { _id: 1, service_type: 1, createdAt: 1 }).lean();
 
-    db.query(sql, [date], (err, results) => {
-        if (err) {
-            console.error('Error fetching solar data:', err);
-            return res.status(500).json({ success: false, message: 'Error fetching solar data.' });
-        }
-        res.json(results);
-    });
+    // format timestamp similar to SQL DATE_FORMAT
+    const mapped = results.map(r => ({
+      id: r._id,
+      serviceType: r.service_type,
+      formatted_timestamp: r.createdAt.toISOString().replace('T', ' ').split('.')[0]
+    }));
+
+    res.json(mapped);
+  } catch (err) {
+    console.error('Error fetching solar data:', err);
+    res.status(500).json({ success: false, message: 'Error fetching solar data.' });
+  }
 });
 
+/* 
+  Duplicate route names in original code replaced by single handler versions above.
+  If you intentionally had two /submit-form or /submit-contact endpoints,
+  the later definitions in the file will take precedence (this file uses the converted ones).
+*/
 
-// Start the server
+// Fallback for SPA
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Start server
 app.listen(port, () => {
-    console.log(`Server running at http://localhost:${port}`);
+  console.log(`Server running at http://localhost:${port}`);
 });
