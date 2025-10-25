@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solar Calculator Data</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</head>
+<body>
+    <header class="d-flex justify-content-between align-items-center p-3 bg-light">
+        <div class="logo">
+            <a href="index.html"><img src="Frame 29.png" alt="Logo"></a>
+        </div>
+        <ul class="navbar nav">
+            <li class="nav-item"><a class="nav-link" href="Chooseyourservice.html">Service Requests</a></li>
+            <li class="nav-item"><a class="nav-link" href="solarcalculatorform.html">Solar Data</a></li>
+            <li class="nav-item"><a class="nav-link" href="clientcallback.html">Communication Requests</a></li>
+            <li class="nav-item"><a class="nav-link" href="index.html">Home</a></li>
+        </ul>
+    </header>
+    
+    <main class="container mt-5">
+        <h1 style="padding-top: 40px;">Solar Calculator Data</h1>
+        <div id="solar-data"></div>
+    </main>
+
+    <script>
+        // Fetching the solar calculator data
+        fetch('/get-calculator-data')
+            .then(response => response.json())
+            .then(data => {
+                const container = document.getElementById('solar-data');
+                if (data.success && data.data.length === 0) {
+                    container.innerHTML = '<p>No solar calculator data found.</p>';
+                    return;
+                }
+                const table = document.createElement('table');
+                table.classList.add('table', 'table-striped');
+
+                const thead = document.createElement('thead');
+                thead.innerHTML = `
+                    <tr>
+                        <th>Panel Capacity (kW)</th>
+                        <th>Roof Area (sq ft)</th>
+                        <th>Budget (Rs)</th>
+                        <th>State</th>
+                        <th>Customer Category</th>
+                        <th>Electricity Cost (Rs/kWh)</th>
+                    </tr>`;
+                table.appendChild(thead);
+
+                const tbody = document.createElement('tbody');
+                data.data.forEach(item => {
+                    const row = document.createElement('tr');
+                    row.innerHTML = `
+                        <td>${item.panel_capacity}</td>
+                        <td>${item.roof_area}</td>
+                        <td>${item.budget}</td>
+                        <td>${item.state}</td>
+                        <td>${item.customer_category}</td>
+                        <td>${item.electricity_cost}</td>
+                    `;
+                    tbody.appendChild(row);
+                });
+                table.appendChild(tbody);
+                container.appendChild(table);
+            })
+            .catch(error => {
+                console.error('Error fetching solar calculator data:', error);
+                document.getElementById('solar-data').innerHTML = '<p>Error loading solar calculator data.</p>';
+            });
+    </script>
+</body>
+</html>
