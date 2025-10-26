@@ -7,20 +7,50 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # 2. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      # 3. Install dependencies
       - name: Install dependencies
         run: npm ci
 
-    #  - name: Run tests
-    #    run: npm test
+      # 4. Login to Azure
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # 5. Build and push Docker image
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: true
+          tags: devopsmsb123.azurecr.io/devopsproject:latest
+
+      # 6. Set AKS context
+      - name: Set AKS context
+        uses: azure/aks-set-context@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          cluster-name: devops-aks
+          resource-group: DevopsProject
+
+      # 7. Deploy to AKS
+      - name: Deploy to AKS
+        uses: azure/k8s-deploy@v3
+        with:
+          manifests: |
+            manifests/deployment.yaml
+            manifests/service.yaml
