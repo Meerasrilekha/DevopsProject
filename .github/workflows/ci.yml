@@ -29,9 +29,14 @@ jobs:
       - name: Run simple test
         run: |
           npm install -g http-server
-          http-server . -p 8080 &       # Start server in background
-          sleep 5                        # Wait for server to start
-          curl -f http://localhost:8080 || exit 1  # Test if server responds
+          # Start server in the background on port 8080
+          http-server . -p 8080 &
+          SERVER_PID=$!
+          sleep 5
+          # Check if server responds
+          curl -f http://localhost:8080 || { echo "Server test failed"; kill $SERVER_PID; exit 1; }
+          echo "Server test passed"
+          kill $SERVER_PID
 
       # 5. Login to Azure
       - name: Login to Azure
