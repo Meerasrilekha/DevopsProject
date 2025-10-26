@@ -1,5 +1,5 @@
 name: CI/CD
-#this is updated yml file
+
 on:
   push:
     branches: [ main ]
@@ -25,13 +25,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # 4. Login to Azure
-      - name: Login to Azure
+      # 4. Login to Azure and ACR
+      - name: Azure login and ACR login
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # 5. Build and push Docker image
+      # 5. Build and push Docker image to ACR
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
