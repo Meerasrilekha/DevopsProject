@@ -25,13 +25,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # 4. Login to Azure and ACR
-      - name: Azure login and ACR login
+      # 4. Login to Azure
+      - name: Login to Azure
         uses: azure/login@v1
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # 5. Build and push Docker image to ACR
+      # 5. Login to Azure Container Registry
+      - name: Login to ACR
+        run: |
+          az acr login --name devopsmsb123
+
+      # 6. Build and push Docker image
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
@@ -39,7 +44,7 @@ jobs:
           push: true
           tags: devopsmsb123.azurecr.io/devopsproject:latest
 
-      # 6. Set AKS context
+      # 7. Set AKS context
       - name: Set AKS context
         uses: azure/aks-set-context@v1
         with:
@@ -47,7 +52,7 @@ jobs:
           cluster-name: devops-aks
           resource-group: DevopsProject
 
-      # 7. Deploy to AKS
+      # 8. Deploy to AKS
       - name: Deploy to AKS
         uses: azure/k8s-deploy@v3
         with:
