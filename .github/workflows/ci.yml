@@ -1,4 +1,4 @@
-name: CI_CD  # Changed from CI/CD to CI_CD to avoid invalid Kubernetes labels
+name: CI_CD
 
 on:
   push:
@@ -62,4 +62,8 @@ jobs:
           manifests: |
             manifests/deployment.yaml
             manifests/service.yaml
-          add-github-actions-labels: false  # Disable automatic labels to prevent errors
+          add-github-actions-labels: false
+
+      # 9. Print service info
+      - name: Show deployed service
+        run: kubectl get svc myapp-service
