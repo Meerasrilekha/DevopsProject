@@ -1,0 +1,12 @@
+- name: Deploy app manifests to AKS
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Apply Kubernetes manifests
+      command: kubectl apply -f ./manifests/
+      args:
+        chdir: "{{ playbook_dir }}"
+      register: apply_result
+    - debug:
+        var: apply_result.stdout_lines
