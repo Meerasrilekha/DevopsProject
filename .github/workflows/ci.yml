@@ -31,7 +31,15 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # 5. Build and push Docker image
+      # 5. Login to Azure Container Registry (ACR)
+      - name: Login to ACR
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+          registry: devopsmsb123.azurecr.io
+
+      # 6. Build and push Docker image
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
@@ -39,7 +47,7 @@ jobs:
           push: true
           tags: devopsmsb123.azurecr.io/devopsproject:latest
 
-      # 6. Set AKS context
+      # 7. Set AKS context
       - name: Set AKS context
         uses: azure/aks-set-context@v1
         with:
@@ -47,7 +55,7 @@ jobs:
           cluster-name: devops-aks
           resource-group: DevopsProject
 
-      # 7. Deploy to AKS
+      # 8. Deploy to AKS
       - name: Deploy to AKS
         uses: azure/k8s-deploy@v3
         with:
