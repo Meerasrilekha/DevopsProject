@@ -1,4 +1,4 @@
-name: CI/CD
+name: CI_CD  # Changed from CI/CD to CI_CD to avoid invalid Kubernetes labels
 
 on:
   push:
@@ -31,12 +31,7 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      # 5. Login to Azure Container Registry
-      - name: Login to ACR
-        run: |
-          az acr login --name devopsmsb123
-
-      # 6. Build and push Docker image
+      # 5. Build and push Docker image
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
@@ -44,7 +39,7 @@ jobs:
           push: true
           tags: devopsmsb123.azurecr.io/devopsproject:latest
 
-      # 7. Set AKS context
+      # 6. Set AKS context
       - name: Set AKS context
         uses: azure/aks-set-context@v1
         with:
@@ -52,10 +47,11 @@ jobs:
           cluster-name: devops-aks
           resource-group: DevopsProject
 
-      # 8. Deploy to AKS
+      # 7. Deploy to AKS
       - name: Deploy to AKS
         uses: azure/k8s-deploy@v3
         with:
           manifests: |
             manifests/deployment.yaml
             manifests/service.yaml
+          add-github-actions-labels: false  # Disable automatic labels to prevent errors
